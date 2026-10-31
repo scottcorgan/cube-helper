@@ -20,7 +20,7 @@ function shrink(q, f = 0.1) {
   return q.map(p => p.map((v, k) => v + (c[k] - v) * f));
 }
 
-function inLayer(move, face, i) {
+export function inLayer(move, face, i) {
   const m = move[0];
   if ('xyz'.includes(m)) return true;
   if (m === 'R') return face === 'R' || i % 3 === 2;
@@ -32,7 +32,9 @@ function inLayer(move, face, i) {
   return false;
 }
 
-function arrowPath(move) {
+// The arrow in 3D (before the slanted drawing). Exported so tests can check it
+// points the same way the model turns.
+export function arrowPoints(move) {
   const m = move[0], prime = move.endsWith("'"), e = 1.06;
   let pts;
   const line = (a, b, n = 8) => Array.from({ length: n + 1 }, (_, i) => a.map((v, k) => v + (b[k] - v) * i / n));
@@ -52,8 +54,9 @@ function arrowPath(move) {
     pts = [...line([1.15, -0.85, e], [1.15, 0.85, e]), ...line([1.15, e, 0.8], [1.15, e, -0.2], 4)];
     if (prime) pts.reverse();
   }
-  return pts.map(P);
+  return pts;
 }
+function arrowPath(move) { const pts = arrowPoints(move); return pts && pts.map(P); }
 
 function arrowSvg(move, color) {
   const pts = arrowPath(move);

@@ -25,5 +25,10 @@ npm test                          # node --test: cube model, 1000-scramble solve
 python3 -m http.server 8000       # then open http://localhost:8000
 cd scripts && npm install          # puppeteer-core, for headless checks
 node make_video.mjs && node live.mjs http://127.0.0.1:8000/   # fake-camera auto-capture run
+node make_video.mjs /tmp/fake/w.y4m 1280 720 && node flow.mjs /tmp/fake/w.y4m http://127.0.0.1:8000/ extra
+                                  # full phone flow: live scan -> review -> every walkthrough card; checks the moves solve the cube
+                                  # (width/height = camera shape; add `turn` to make_video to hold the yellow side the wrong way up)
+node paint_check.mjs              # tap-in mode end to end (needs /tmp/fake/cube.json from make_video)
+node sw_check.mjs http://127.0.0.1:8000/   # service worker caches the current version and works offline
 ```
 Screenshots from the scripts go to `screenshots/` and are not committed.

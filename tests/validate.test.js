@@ -65,3 +65,34 @@ test('rejects impossible pieces, duplicates, blanks, and bad centers', () => {
   assert.equal(validate(cent).errors[0].type, 'centers');
   assert.equal(validate(solvedState(), { ...SCHEME, F: 'B', B: 'G' }).errors[0].type, 'centers');
 });
+
+test('no false rejects: legal piece changes stay valid, illegal combos are caught', () => {
+  const swap = (s, a, b) => { const va = a.map(k => s[k]), vb = b.map(k => s[k]); a.forEach((k, j) => { s[k] = vb[j]; }); b.forEach((k, j) => { s[k] = va[j]; }); };
+  const cs = Object.values(CORNERS), es = Object.values(EDGES);
+  for (let i = 0; i < 100; i++) {
+    // two corners twisted opposite ways = legal
+    let s = scr(); let a = cs[i % 8], b = cs[(i + 1 + (i % 7)) % 8];
+    [s[a[0]], s[a[1]], s[a[2]]] = [s[a[2]], s[a[0]], s[a[1]]];
+    [s[b[0]], s[b[1]], s[b[2]]] = [s[b[1]], s[b[2]], s[b[0]]];
+    assert.ok(validate(s, SCHEME).ok, 'opposite twists');
+    // two edges flipped = legal
+    s = scr(); const e1 = es[i % 12], e2 = es[(i + 1 + (i % 11)) % 12];
+    [s[e1[0]], s[e1[1]]] = [s[e1[1]], s[e1[0]]]; [s[e2[0]], s[e2[1]]] = [s[e2[1]], s[e2[0]]];
+    assert.ok(validate(s, SCHEME).ok, 'two flips');
+    // swap two corners AND two edges = legal
+    s = scr(); swap(s, cs[i % 8], cs[(i + 3) % 8]); swap(s, es[i % 12], es[(i + 5) % 12]);
+    assert.ok(validate(s, SCHEME).ok, 'double swap');
+    // three-cycle of edges = legal
+    s = scr(); const [x, y, z] = [es[i % 12], es[(i + 4) % 12], es[(i + 8) % 12]];
+    const vx = x.map(k => s[k]), vy = y.map(k => s[k]), vz = z.map(k => s[k]);
+    x.forEach((k, j) => { s[k] = vz[j]; }); y.forEach((k, j) => { s[k] = vx[j]; }); z.forEach((k, j) => { s[k] = vy[j]; });
+    assert.ok(validate(s, SCHEME).ok, '3-cycle');
+  }
+  // a twisted corner plus a flipped edge: both reported
+  const s = scr(); const c = cs[0], e = es[0];
+  [s[c[0]], s[c[1]], s[c[2]]] = [s[c[2]], s[c[0]], s[c[1]]]; [s[e[0]], s[e[1]]] = [s[e[1]], s[e[0]]];
+  const v = validate(s, SCHEME); assert.ok(v.errors.some(x => x.type === 'twist') && v.errors.some(x => x.type === 'flip'));
+  // two identical corners (copied stickers) -> duplicate
+  const d = scr(); swap(d, [], []); CORNERS.URF.forEach((k, j) => { d[CORNERS.DRB[j]] = d[k]; });
+  assert.ok(!validate(d, SCHEME).ok);
+});

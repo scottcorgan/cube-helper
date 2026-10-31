@@ -39,7 +39,7 @@ const onReview = await page.$eval('#review', e => e.classList.contains('on'));
 console.log('reached review:', onReview, 'after', ((Date.now() - t0) / 1000).toFixed(1), 's');
 if (onReview) {
   await wait(300);
-  const st = JSON.parse(fs.readFileSync('/tmp/fake/state.json')).st;
+  const st = JSON.parse(fs.readFileSync('/tmp/fake/cube.json')).st;
   const read = await page.evaluate(() => [...document.querySelectorAll('#review-net rect[data-i]')].map(r => [+r.dataset.i, r.getAttribute('fill')]));
   const HEX = { W: '#ffffff', Y: '#ffd500', G: '#009b48', B: '#0046ad', R: '#c41e3a', O: '#ff6a00' };
   console.log('misread stickers =', read.filter(([i, f]) => HEX[st[i]] !== f).length, 'of', read.length);

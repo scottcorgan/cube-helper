@@ -1,30 +1,21 @@
 import { FACES, COLORS, COLOR_HEX, COLOR_NAMES, SCHEME, solvedState, applyMoves, randomScramble, applyMove, center } from './cube.js';
 import { validate } from './validate.js';
 import { solve, STAGES, ALGS } from './solver.js';
-import { sampleGrid, classifyCube, classifyLoose } from './color.js';
+import { sampleGrid, classifyLoose } from './color.js';
 import { analyzeFace, checkSide, signature, HoldTimer } from './detect.js';
 import { cubeSvg, netSvg, holdSvg, faceSvg } from './render.js';
 import { moveWords, STAGE_TEXT, ALG_TEXT, segmentIntro, holdWords } from './text.js';
+import { SCAN, faceDone, turnFace, assemble, fixTurnedFaces } from './scan.js';
 
 const $ = s => document.querySelector(s);
 const NAME = c => COLOR_NAMES[c].toUpperCase();
 const chip = c => `<span class="chip" style="background:${COLOR_HEX[c]};color:${'WYO'.includes(c) ? '#222' : '#fff'}">${NAME(c)}</span>`;
 
-// The 6 photos: face in the model, color facing you, color on top.
-const SCAN = [
-  { face: 'F', front: 'G', top: 'Y', hint: 'Yellow middle on top, green middle looking at you.' },
-  { face: 'R', front: 'O', top: 'Y', hint: 'Keep yellow on top. Turn the whole cube to the left one time.' },
-  { face: 'B', front: 'B', top: 'Y', hint: 'Keep yellow on top. Turn the whole cube to the left again.' },
-  { face: 'L', front: 'R', top: 'Y', hint: 'Keep yellow on top. One more turn to the left.' },
-  { face: 'U', front: 'Y', top: 'B', hint: 'Now tip the cube so the yellow top looks at you. Blue goes on top.' },
-  { face: 'D', front: 'W', top: 'G', hint: 'Last one! Turn it so white looks at you, with green on top.' },
-];
-
 const app = {
   step: 0, mode: 'photo',
   faces: SCAN.map(() => null),        // {colors[9], samples?, manual{}, photo?, rect?}
   cube: null, low: new Set(), paint: 'W',
-  cards: [], idx: 0, stream: null, retakeOnly: false,
+  cards: [], idx: 0, stream: null, retakeOnly: false, turned: [],
 };
 
 // ---------- routing ----------
@@ -32,7 +23,7 @@ function show(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === id));
   window.scrollTo(0, 0);
   $('#confetti').innerHTML = '';
-  if (id !== 'scan') stopCam();
+  if (id !== 'scan') { cancelGot(); stopCam(); }
 }
 function go(id) {
   if (id === 'scan' || id === 'paint') { startScan(id === 'paint' ? 'paint' : 'photo'); id = 'scan'; }
@@ -41,6 +32,7 @@ function go(id) {
   if (id === 'home') renderHome();
   if (location.hash !== '#' + id) history.pushState(null, '', '#' + id);
   show(id);
+  if (id === 'scan') ensureCam(); // after show: the camera only opens on a visible scan screen
 }
 function onNav() {
   const id = (location.hash || '#home').slice(1);
@@ -49,7 +41,9 @@ function onNav() {
   if (id === 'paint') return go('paint');
   if (id === 'solve' && !app.cards.length) return go('home');
   if (id === 'review' && !app.cube) return go('home');
+  if (id === 'scan' && !app.faces.some(Boolean)) return go('home'); // nothing to come back to
   show(document.getElementById(id) ? id : 'home');
+  if (id === 'scan') { renderStep(); ensureCam(); }
 }
 window.addEventListener('popstate', onNav);
 window.addEventListener('hashchange', onNav);
@@ -71,8 +65,13 @@ $('#resume').onclick = () => {
 function startScan(mode) {
   app.mode = mode; app.step = 0; app.retakeOnly = false;
   app.faces = SCAN.map(s => mode === 'paint' ? { colors: Array.from({ length: 9 }, (_, i) => i === 4 ? s.front : '?'), manual: {} } : null);
+  if (mode === 'paint') stopCam();
   renderStep();
-  if (mode === 'photo' && !app.stream) startCam();
+}
+// Camera on whenever the scan screen is waiting for a photo.
+function ensureCam() {
+  const f = app.faces[app.step];
+  if (app.mode === 'photo' && !app.stream && !camStarting && !(f && f.photo) && $('#scan').classList.contains('on') && !document.hidden) startCam();
 }
 
 function renderDots() {
@@ -117,24 +116,32 @@ $('#read-face').addEventListener('click', e => {
   const f = app.faces[app.step]; f.colors[i] = app.paint; f.manual[i] = app.paint; renderStep();
 });
 $('#scan-next').onclick = () => {
+  cancelGot();
   if (app.step < 5 && !app.retakeOnly) { app.step++; renderStep(); window.scrollTo(0, 0); }
   else buildCube();
 };
 $('#scan-back').onclick = () => {
+  cancelGot();
   const f = app.faces[app.step];
-  if (app.mode === 'photo' && f && f.photo) { app.faces[app.step] = null; renderStep(); return; }
-  if (app.step > 0) { app.step--; renderStep(); } else go('home');
+  if (app.mode === 'photo' && f && f.photo) { app.faces[app.step] = null; renderStep(); ensureCam(); return; }
+  if (app.step > 0) { app.step--; renderStep(); ensureCam(); } else go('home');
 };
 
 // camera
-$('#cam-start').onclick = startCam;
+$('#cam-start').onclick = () => startCam();
+let camStarting = false;
 async function startCam() {
+  if (camStarting) return; // one camera request at a time
+  camStarting = true;
+  try { await openCam(); } finally { camStarting = false; }
+}
+async function openCam() {
   const msg = $('#cam-msg');
   const fallback = why => { msg.innerHTML = `<p>${why} That's OK!</p><p>Use the "Camera app" button below, or</p><button class="btn" data-go="paint">✏️ Tap in the colors</button>`; };
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return fallback('The live camera doesn\'t work here.');
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 1280 } }, audio: false });
-    if (!$('#scan').classList.contains('on') || app.mode !== 'photo') { stream.getTracks().forEach(t => t.stop()); return; }
+    if (!$('#scan').classList.contains('on') || app.mode !== 'photo' || document.hidden) { stream.getTracks().forEach(t => t.stop()); return; }
     stopCam();
     app.stream = stream;
     const v = $('#video'); v.srcObject = stream; await v.play().catch(() => {});
@@ -150,9 +157,15 @@ async function startCam() {
   }
 }
 function stopCam() {
-  cancelAnimationFrame(live.raf); clearTimeout(live.gotTimer); live.busy = false;
+  cancelAnimationFrame(live.raf);
   if (app.stream) { app.stream.getTracks().forEach(t => t.stop()); app.stream = null; }
+  const v = $('#video'); if (v) v.srcObject = null;
 }
+// Phone locked or app switched: let go of the camera, take it back on return.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { if (app.stream) { stopCam(); renderStep(); } }
+  else if ($('#scan').classList.contains('on')) ensureCam();
+});
 $('#torch').onclick = async () => {
   const track = app.stream && app.stream.getVideoTracks()[0]; if (!track) return;
   const on = !$('#torch').classList.contains('on');
@@ -167,9 +180,14 @@ let sound = localStorage.getItem('cube-helper-sound') !== 'off', audio = null;
 const setSoundBtn = () => { $('#sound').textContent = sound ? '🔊' : '🔇'; };
 setSoundBtn();
 $('#sound').onclick = () => { sound = !sound; localStorage.setItem('cube-helper-sound', sound ? 'on' : 'off'); setSoundBtn(); };
-document.addEventListener('pointerdown', () => { // phones only allow sound after a tap
-  try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); if (audio.state === 'suspended') audio.resume(); } catch {}
-});
+const unlockAudio = () => { // phones only allow sound after a tap (iPhone: touchend/click, not pointerdown)
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    if (!audio) { audio = new AC(); const b = audio.createBufferSource(); b.buffer = audio.createBuffer(1, 1, 22050); b.connect(audio.destination); b.start(0); }
+    if (audio.state === 'suspended') audio.resume();
+  } catch {}
+};
+['touchend', 'click', 'keydown'].forEach(ev => document.addEventListener(ev, unlockAudio, { capture: true, passive: true }));
 function beep() {
   if (navigator.vibrate) try { navigator.vibrate(60); } catch {}
   if (!sound || !audio) return;
@@ -230,22 +248,31 @@ function autoSnap() {
   app.faces[app.step] = { photo: g.canvas, rect: g.rect, manual: {}, colors: [], samples: null, auto: true };
   readPhoto();
   setLive('good', 1);
-  const next = app.faces.findIndex(f => !f || !f.samples), last = app.retakeOnly || next < 0;
+  const next = app.faces.findIndex(f => !faceDone(f)), last = app.retakeOnly || next < 0;
   $('#got-face').innerHTML = faceSvg(app.faces[app.step].colors, { size: 120 });
   $('#got-text').textContent = last ? 'Got it! All done! 🎉' : `Got it! ✓ Next: ${NAME(SCAN[next].front)}`;
   $('#got').classList.remove('hidden');
   renderDots();
   live.gotTimer = setTimeout(() => {
+    live.gotTimer = 0;
     $('#got').classList.add('hidden');
     live.busy = false;
+    if (!$('#scan').classList.contains('on')) return;
     if (last) { app.retakeOnly = false; buildCube(); return; }
     app.step = next; renderStep(); window.scrollTo(0, 0);
   }, 1400);
 }
+// A button was tapped while "Got it!" was showing: stay on this side.
+function cancelGot() {
+  if (!live.gotTimer) return;
+  clearTimeout(live.gotTimer); live.gotTimer = 0; live.busy = false;
+  $('#got').classList.add('hidden');
+}
 
-$('#snap').onclick = () => { const g = grabFrame(); if (g) usePhoto(g.canvas, g.rect); };
+$('#snap').onclick = () => { if (live.busy) return; const g = grabFrame(); if (g) usePhoto(g.canvas, g.rect); };
 $('#file').onchange = e => {
   const file = e.target.files[0]; if (!file) return;
+  cancelGot();
   const img = new Image();
   img.onload = () => {
     const scale = Math.min(1, 1000 / Math.max(img.naturalWidth, img.naturalHeight));
@@ -260,6 +287,7 @@ $('#file').onchange = e => {
 };
 
 function usePhoto(canvas, rect) {
+  if (!$('#scan').classList.contains('on')) return;
   app.faces[app.step] = { photo: canvas, rect, manual: {}, colors: [], samples: null };
   readPhoto();
   renderStep();
@@ -314,23 +342,23 @@ window.addEventListener('resize', () => { const f = app.faces[app.step]; if (f &
 
 // ---------- build + review ----------
 function buildCube() {
-  const cube = new Array(54).fill('?');
-  app.low = new Set();
-  const allPhotos = app.faces.every(f => f && f.samples);
-  if (allPhotos) {
-    const samples = new Array(54);
-    app.faces.forEach((f, i) => { const fi = FACES.indexOf(SCAN[i].face); f.samples.forEach((s, k) => { samples[fi * 9 + k] = s; }); });
-    const { colors, confidence } = classifyCube(samples, SCHEME);
-    colors.forEach((c, i) => { cube[i] = c; if (confidence[i] < 0.12) app.low.add(i); });
+  let { cube, low } = assemble(app.faces);
+  app.turned = [];
+  const fix = fixTurnedFaces(cube);
+  if (fix) {
+    // Some sides were held with a different color on top. Turn those records
+    // so the picture, the fixes, and the model agree from now on.
+    SCAN.forEach((st, i) => {
+      const q = fix.q[FACES.indexOf(st.face)], f = app.faces[i]; if (!q || !f) return;
+      f.colors = turnFace(f.colors, q);
+      if (f.samples) f.samples = turnFace(f.samples, q);
+      const man = turnFace(Array.from({ length: 9 }, (_, k) => f.manual[k]), q);
+      f.manual = {}; man.forEach((c, k) => { if (c) f.manual[k] = c; });
+      app.turned.push(st.front);
+    });
+    ({ cube, low } = assemble(app.faces));
   }
-  app.faces.forEach((f, i) => {
-    const fi = FACES.indexOf(SCAN[i].face);
-    if (!f) return;
-    for (let k = 0; k < 9; k++) {
-      if (!allPhotos || f.manual[k]) cube[fi * 9 + k] = f.manual[k] || f.colors[k];
-    }
-  });
-  app.cube = cube;
+  app.cube = cube; app.low = low;
   go('review');
   renderReview();
 }
@@ -342,7 +370,8 @@ function renderReview() {
   $('#review-net').innerHTML = netSvg(app.cube, { size: Math.min(480, window.innerWidth - 28), highlight: hl, selectable: true });
   $('#review-palette').innerHTML = COLORS.map(c => `<button class="swatch ${c === app.paint ? 'sel' : ''}" data-c="${c}" style="background:${COLOR_HEX[c]}" aria-label="${COLOR_NAMES[c]}"></button>`).join('');
   const st = $('#review-status');
-  if (v.ok) { st.className = 'status ok'; st.innerHTML = '✅ This looks like a real cube! ' + (app.low.size ? 'Give the pink-outlined stickers a quick look, then solve.' : ''); }
+  const turned = app.turned.length ? `<br>🔄 The ${app.turned.map(chip).join(' ')} picture${app.turned.length > 1 ? 's were' : ' was'} held a different way up, so I turned ${app.turned.length > 1 ? 'them' : 'it'} to fit.` : '';
+  if (v.ok) { st.className = 'status ok'; st.innerHTML = '✅ This looks like a real cube! ' + (app.low.size ? 'Give the pink-outlined stickers a quick look, then solve.' : '') + turned; }
   else { st.className = 'status bad'; st.innerHTML = '🤔 Something doesn\'t add up yet:<ul>' + v.errors.map(e => `<li>${e.msg}</li>`).join('') + '</ul>'; }
   $('#go-solve').disabled = !v.ok;
   $('#retake').innerHTML = SCAN.map((s, i) => `<button class="btn small" data-retake="${i}">${chip(s.front)}</button>`).join('');
@@ -360,11 +389,15 @@ $('#retake').addEventListener('click', e => {
   const b = e.target.closest('[data-retake]'); if (!b) return;
   app.step = +b.dataset.retake; app.mode = 'photo';
   if (app.faces[app.step]) app.faces[app.step] = null;
-  app.retakeOnly = app.faces.every((f, i) => i === app.step || (f && f.samples));
+  app.retakeOnly = app.faces.every((f, i) => i === app.step || faceDone(f));
+  app.turned = [];
   history.pushState(null, '', '#scan'); show('scan'); renderStep();
-  if (!app.stream) startCam();
+  ensureCam();
 });
-$('#go-solve').onclick = () => startSolve(app.cube, 0);
+$('#go-solve').onclick = () => {
+  try { startSolve(app.cube, 0); }
+  catch { const st = $('#review-status'); st.className = 'status bad'; st.textContent = '🤔 I couldn\'t find a way to solve this one. Check the colors again.'; }
+};
 
 // ---------- walk-through ----------
 function startSolve(cube, idx) {
@@ -513,4 +546,4 @@ const startId = (location.hash || '#home').slice(1);
 if (startId === 'demo') { startSolve(applyMoves(solvedState(), "R U2 F' L D2 B R' U F2 D' L2 U'"), +new URLSearchParams(location.search).get('card') || 0); }
 else if (['learn', 'practice', 'paint', 'scan'].includes(startId)) go(startId);
 else show('home');
-if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('sw.js').catch(() => {});
