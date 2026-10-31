@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fff7e8">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Cube Helper">
+<title>Cube Helper for Wells</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main id="app">
+
+<section class="screen" id="home">
+  <div class="hero">
+    <div id="home-cube"></div>
+    <h1>Cube Helper</h1>
+    <p class="sub">Let's solve the Rubik's Cube together, Wells! 🎉</p>
+  </div>
+  <div class="stack">
+    <button class="btn big primary" data-go="scan">📸 Scan my cube</button>
+    <button class="btn big" data-go="paint">✏️ Tap in the colors</button>
+    <button class="btn big" data-go="learn">🎓 Learn the moves</button>
+    <button class="btn big ghost hidden" id="resume">▶️ Keep solving</button>
+    <button class="btn ghost" data-go="practice">🎲 Practice with a mixed-up cube</button>
+  </div>
+  <p class="fine">Works offline. No accounts, no ads, nothing leaves your phone.</p>
+</section>
+
+<section class="screen" id="scan">
+  <header class="bar"><button class="btn small ghost" data-go="home">✕</button><div class="dots" id="scan-dots"></div><span id="scan-count"></span></header>
+  <div class="hold">
+    <div id="scan-hold"></div>
+    <div><p class="say" id="scan-say"></p><p class="hint" id="scan-hint"></p></div>
+  </div>
+
+  <div id="photo-mode">
+    <div id="cam-box" class="cam-box">
+      <video id="video" playsinline muted autoplay></video>
+      <div class="grid-overlay" id="live-grid"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="cam-msg" id="cam-msg">
+        <p>Line the cube up inside the 3×3 grid.</p>
+        <button class="btn primary" id="cam-start">📷 Turn on camera</button>
+      </div>
+    </div>
+    <div class="row" id="cam-buttons">
+      <button class="btn primary big grow hidden" id="snap">📸 Snap</button>
+      <label class="btn grow" id="file-label">🖼️ Use Camera app<input id="file" type="file" accept="image/*" capture="environment" hidden></label>
+    </div>
+    <div id="photo-review" class="hidden">
+      <div class="photo-wrap" id="photo-wrap"><canvas id="photo"></canvas>
+        <div class="crop" id="crop"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+      <label class="slider">Grid size <input type="range" id="crop-size" min="20" max="100" value="70"></label>
+      <p class="hint">Drag the grid so each sticker sits in a box.</p>
+    </div>
+  </div>
+
+  <div id="read-box" class="read-box hidden">
+    <div><p class="label" id="read-label">I see:</p><div id="read-face"></div></div>
+    <div class="palette" id="scan-palette"></div>
+  </div>
+  <p class="hint center" id="read-hint"></p>
+
+  <footer class="nav">
+    <button class="btn big" id="scan-back">◀ Back</button>
+    <button class="btn big primary" id="scan-next" disabled>Next ▶</button>
+  </footer>
+</section>
+
+<section class="screen" id="review">
+  <header class="bar"><button class="btn small ghost" data-go="home">✕</button><h2>Check the colors</h2><span></span></header>
+  <p class="hint center">Tap a color, then tap any sticker to fix it. Pink outlines = please double-check.</p>
+  <div id="review-net" class="center"></div>
+  <div class="palette center" id="review-palette"></div>
+  <div id="review-status" class="status"></div>
+  <div class="stack">
+    <button class="btn big primary" id="go-solve" disabled>Let's solve it! ▶</button>
+  </div>
+  <details class="more"><summary>Retake a side</summary><div class="row wrap" id="retake"></div></details>
+</section>
+
+<section class="screen" id="solve">
+  <header class="bar"><button class="btn small ghost" data-go="home">✕</button><div class="stages" id="stage-dots"></div><button class="btn small ghost" id="show-net" aria-label="See all sides">🗺️</button></header>
+  <div class="progress"><div id="progress-fill"></div></div>
+  <div id="card" class="card"></div>
+  <footer class="nav">
+    <button class="btn big" id="prev">◀ Back</button>
+    <button class="btn big primary" id="next">Next ▶</button>
+  </footer>
+</section>
+
+<section class="screen" id="learn">
+  <header class="bar"><button class="btn small ghost" data-go="home">✕</button><h2>Learn the moves</h2><span></span></header>
+  <div id="learn-body"></div>
+</section>
+
+<section class="screen" id="practice">
+  <header class="bar"><button class="btn small ghost" data-go="home">✕</button><h2>Practice</h2><span></span></header>
+  <div id="practice-body"></div>
+</section>
+
+</main>
+<div id="sheet" class="sheet hidden"><div class="sheet-card"><div id="sheet-body"></div><button class="btn big" id="sheet-close">Close</button></div></div>
+<div id="confetti" aria-hidden="true"></div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
