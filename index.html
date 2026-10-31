@@ -42,13 +42,24 @@
     <div id="cam-box" class="cam-box">
       <video id="video" playsinline muted autoplay></video>
       <div class="grid-overlay" id="live-grid"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="cam-tools hidden" id="cam-tools">
+        <button class="btn small round hidden" id="torch" aria-label="Flashlight">🔦</button>
+        <button class="btn small round" id="sound" aria-label="Sound on or off">🔊</button>
+      </div>
+      <div class="got hidden" id="got"><div id="got-face"></div><p id="got-text">Got it!</p></div>
+      <div class="flash" id="flash"></div>
       <div class="cam-msg" id="cam-msg">
-        <p>Line the cube up inside the 3×3 grid.</p>
+        <p>Line the cube up inside the 3×3 grid. I'll take the picture by myself!</p>
         <button class="btn primary" id="cam-start">📷 Turn on camera</button>
       </div>
     </div>
+    <div class="live-pill hidden" id="live-pill" role="status" aria-live="polite">
+        <svg viewBox="0 0 36 36" width="34" height="34" aria-hidden="true"><circle cx="18" cy="18" r="14" class="ring-bg"/><circle cx="18" cy="18" r="14" class="ring" id="live-ring"/></svg>
+        <span id="live-text">Move the cube into the square</span>
+      </div>
+    <p class="hint center" id="cam-tip">💡 Use even light, like near a window. No big shadows on the cube.</p>
     <div class="row" id="cam-buttons">
-      <button class="btn primary big grow hidden" id="snap">📸 Snap</button>
+      <button class="btn grow hidden" id="snap">📸 Snap it myself</button>
       <label class="btn grow" id="file-label">🖼️ Use Camera app<input id="file" type="file" accept="image/*" capture="environment" hidden></label>
     </div>
     <div id="photo-review" class="hidden">

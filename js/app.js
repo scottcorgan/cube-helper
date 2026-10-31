@@ -2,6 +2,7 @@ import { FACES, COLORS, COLOR_HEX, COLOR_NAMES, SCHEME, solvedState, applyMoves,
 import { validate } from './validate.js';
 import { solve, STAGES, ALGS } from './solver.js';
 import { sampleGrid, classifyCube, classifyLoose } from './color.js';
+import { analyzeFace, checkSide, signature, HoldTimer } from './detect.js';
 import { cubeSvg, netSvg, holdSvg, faceSvg } from './render.js';
 import { moveWords, STAGE_TEXT, ALG_TEXT, segmentIntro, holdWords } from './text.js';
 
@@ -23,7 +24,7 @@ const app = {
   step: 0, mode: 'photo',
   faces: SCAN.map(() => null),        // {colors[9], samples?, manual{}, photo?, rect?}
   cube: null, low: new Set(), paint: 'W',
-  cards: [], idx: 0, stream: null,
+  cards: [], idx: 0, stream: null, retakeOnly: false,
 };
 
 // ---------- routing ----------
@@ -68,15 +69,19 @@ $('#resume').onclick = () => {
 
 // ---------- scanning / painting ----------
 function startScan(mode) {
-  app.mode = mode; app.step = 0;
+  app.mode = mode; app.step = 0; app.retakeOnly = false;
   app.faces = SCAN.map(s => mode === 'paint' ? { colors: Array.from({ length: 9 }, (_, i) => i === 4 ? s.front : '?'), manual: {} } : null);
   renderStep();
+  if (mode === 'photo' && !app.stream) startCam();
 }
 
+function renderDots() {
+  $('#scan-dots').innerHTML = SCAN.map((s, i) => `<i style="background:${COLOR_HEX[s.front]}" class="${i === app.step ? 'cur' : ''} ${app.faces[i] && !app.faces[i].colors.includes('?') ? 'done' : ''}"></i>`).join('');
+}
 function renderStep() {
   const st = SCAN[app.step], f = app.faces[app.step];
   $('#scan-count').textContent = `${app.step + 1}/6`;
-  $('#scan-dots').innerHTML = SCAN.map((s, i) => `<i style="background:${COLOR_HEX[s.front]}" class="${i === app.step ? 'cur' : ''} ${app.faces[i] && !app.faces[i].colors.includes('?') ? 'done' : ''}"></i>`).join('');
+  renderDots();
   $('#scan-hold').innerHTML = holdSvg(st.front, st.top, 120);
   $('#scan-say').innerHTML = `${chip(st.front)} facing you,<br>${chip(st.top)} on top.`;
   $('#scan-hint').textContent = st.hint;
@@ -88,6 +93,10 @@ function renderStep() {
   $('#photo-review').classList.toggle('hidden', !hasPhoto);
   $('#snap').classList.toggle('hidden', !app.stream);
   $('#cam-msg').classList.toggle('hidden', !!app.stream);
+  $('#cam-tools').classList.toggle('hidden', !app.stream);
+  $('#live-pill').classList.toggle('hidden', !app.stream);
+  $('#cam-tip').classList.toggle('hidden', !!hasPhoto);
+  if (!hasPhoto) resetLive();
   if (hasPhoto) drawPhoto();
   $('#read-box').classList.toggle('hidden', !f);
   if (f) {
@@ -95,9 +104,9 @@ function renderStep() {
     $('#read-face').innerHTML = faceSvg(f.colors, { size: photo ? 132 : 170, selectable: true, face: 0 });
     $('#scan-palette').innerHTML = COLORS.map(c => `<button class="swatch ${c === app.paint ? 'sel' : ''}" data-c="${c}" style="background:${COLOR_HEX[c]}" aria-label="${COLOR_NAMES[c]}"></button>`).join('');
     $('#read-hint').textContent = photo ? 'Wrong color? Pick the right one, then tap the sticker. Or retake the photo.' : 'Pick a color, then tap the stickers. The middle one is already done.';
-  } else $('#read-hint').textContent = 'Good light, no shiny glare, and fill the grid with the cube.';
+  } else $('#read-hint').textContent = app.stream ? '' : 'Good light, no shiny glare, and fill the grid with the cube.';
   $('#scan-next').disabled = !f || f.colors.includes('?');
-  $('#scan-next').textContent = app.step === 5 ? 'Check ✓' : 'Next ▶';
+  $('#scan-next').textContent = app.step === 5 || app.retakeOnly ? 'Check ✓' : 'Next ▶';
   $('#scan-back').textContent = hasPhoto ? '🔄 Retake' : '◀ Back';
 }
 
@@ -108,7 +117,7 @@ $('#read-face').addEventListener('click', e => {
   const f = app.faces[app.step]; f.colors[i] = app.paint; f.manual[i] = app.paint; renderStep();
 });
 $('#scan-next').onclick = () => {
-  if (app.step < 5) { app.step++; renderStep(); window.scrollTo(0, 0); }
+  if (app.step < 5 && !app.retakeOnly) { app.step++; renderStep(); window.scrollTo(0, 0); }
   else buildCube();
 };
 $('#scan-back').onclick = () => {
@@ -120,25 +129,121 @@ $('#scan-back').onclick = () => {
 // camera
 $('#cam-start').onclick = startCam;
 async function startCam() {
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { $('#cam-msg').innerHTML = '<p>Live camera isn\'t available here. Use the "Camera app" button below.</p>'; return; }
+  const msg = $('#cam-msg');
+  const fallback = why => { msg.innerHTML = `<p>${why} That's OK!</p><p>Use the "Camera app" button below, or</p><button class="btn" data-go="paint">✏️ Tap in the colors</button>`; };
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return fallback('The live camera doesn\'t work here.');
   try {
-    app.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 1280 } }, audio: false });
-    const v = $('#video'); v.srcObject = app.stream; await v.play().catch(() => {});
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 1280 } }, audio: false });
+    if (!$('#scan').classList.contains('on') || app.mode !== 'photo') { stream.getTracks().forEach(t => t.stop()); return; }
+    stopCam();
+    app.stream = stream;
+    const v = $('#video'); v.srcObject = stream; await v.play().catch(() => {});
+    const track = stream.getVideoTracks()[0];
+    track.addEventListener('ended', () => { if (app.stream === stream) { stopCam(); renderStep(); } });
+    const caps = track.getCapabilities ? track.getCapabilities() : {};
+    $('#torch').classList.toggle('hidden', !caps.torch);
+    $('#torch').classList.remove('on');
     renderStep();
+    live.raf = requestAnimationFrame(liveLoop);
   } catch (err) {
-    $('#cam-msg').innerHTML = '<p>I couldn\'t open the camera. That\'s OK! Use the "Camera app" button below.</p>';
+    fallback(err && err.name === 'NotAllowedError' ? 'The camera is turned off for this page.' : 'I couldn\'t open the camera.');
   }
 }
-function stopCam() { if (app.stream) { app.stream.getTracks().forEach(t => t.stop()); app.stream = null; } }
+function stopCam() {
+  cancelAnimationFrame(live.raf); clearTimeout(live.gotTimer); live.busy = false;
+  if (app.stream) { app.stream.getTracks().forEach(t => t.stop()); app.stream = null; }
+}
+$('#torch').onclick = async () => {
+  const track = app.stream && app.stream.getVideoTracks()[0]; if (!track) return;
+  const on = !$('#torch').classList.contains('on');
+  try { await track.applyConstraints({ advanced: [{ torch: on }] }); $('#torch').classList.toggle('on', on); } catch {}
+};
 
-$('#snap').onclick = () => {
-  const v = $('#video'); const vw = v.videoWidth, vh = v.videoHeight; if (!vw) return;
+// ---------- live auto-capture ----------
+// ~10 times a second: look at the square. When a cube side fills it, the
+// middle is the color we asked for, and it stays still, take the picture.
+const live = { raf: 0, last: 0, timer: new HoldTimer({ holdMs: 650 }), canvas: null, busy: false, gotTimer: 0, state: '' };
+let sound = localStorage.getItem('cube-helper-sound') !== 'off', audio = null;
+const setSoundBtn = () => { $('#sound').textContent = sound ? '🔊' : '🔇'; };
+setSoundBtn();
+$('#sound').onclick = () => { sound = !sound; localStorage.setItem('cube-helper-sound', sound ? 'on' : 'off'); setSoundBtn(); };
+document.addEventListener('pointerdown', () => { // phones only allow sound after a tap
+  try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); if (audio.state === 'suspended') audio.resume(); } catch {}
+});
+function beep() {
+  if (navigator.vibrate) try { navigator.vibrate(60); } catch {}
+  if (!sound || !audio) return;
+  try {
+    const o = audio.createOscillator(), g = audio.createGain(), t = audio.currentTime;
+    o.frequency.value = 880; g.gain.setValueAtTime(0.15, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+    o.connect(g).connect(audio.destination); o.start(t); o.stop(t + 0.2);
+  } catch {}
+}
+function resetLive() { live.timer.reset(); setLive('aim', 0); }
+function setLive(state, progress, text) {
+  const want = SCAN[app.step].front;
+  const words = { aim: `Show me the ${NAME(want)} side. Fill the square!`, hold: 'Hold still…', good: 'Got it! ✓' };
+  $('#live-text').textContent = text || words[state];
+  $('#live-pill').className = 'live-pill' + (state === 'wrong' ? ' wrong' : state === 'good' ? ' good' : '') + (app.stream ? '' : ' hidden');
+  $('#live-ring').style.strokeDashoffset = 88 * (1 - (state === 'good' ? 1 : progress || 0));
+  $('#live-pill svg').style.display = state === 'wrong' ? 'none' : '';
+  $('#live-grid').className = 'grid-overlay' + (state === 'hold' ? ' seen' : state === 'good' ? ' good' : state === 'wrong' ? ' wrong' : '');
+  live.state = state;
+  document.body.dataset.live = state; // handy for tests
+}
+function liveLoop(t) {
+  live.raf = requestAnimationFrame(liveLoop);
+  if (t - live.last < 100) return;
+  live.last = t;
+  const v = $('#video');
+  if (!app.stream || live.busy || app.mode !== 'photo' || app.faces[app.step] || !$('#scan').classList.contains('on')) return;
+  if (!v.videoWidth || v.readyState < 2) return;
+  const N = 160, c = live.canvas || (live.canvas = document.createElement('canvas'));
+  c.width = c.height = N;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  const m = Math.min(v.videoWidth, v.videoHeight); // the box shows the middle square of the video
+  ctx.drawImage(v, (v.videoWidth - m) / 2, (v.videoHeight - m) / 2, m, m, 0, 0, N, N);
+  const data = ctx.getImageData(0, 0, N, N).data;
+  const rect = { x: 0.1 * N, y: 0.1 * N, size: 0.8 * N }; // same as the white grid
+  const face = analyzeFace(data, N, N, rect);
+  const want = SCAN[app.step].front;
+  const side = face.ok ? checkSide(face, want, knownRefs()) : null;
+  const st = live.timer.update(t, signature(data, N, N, rect), !!(side && side.accept));
+  if (face.ok && !side.accept) {
+    setLive('wrong', 0, side.already ? `We already did the ${NAME(side.saw)} side. Show me the ${NAME(want)} side!` : `That's the ${NAME(side.saw)} side. Show me the ${NAME(want)} side!`);
+  } else if (st.state === 'ready') autoSnap();
+  else setLive(st.state, st.progress);
+}
+function grabFrame() {
+  const v = $('#video'); const vw = v.videoWidth, vh = v.videoHeight; if (!vw) return null;
   const scale = Math.min(1, 1000 / Math.max(vw, vh));
   const c = document.createElement('canvas'); c.width = Math.round(vw * scale); c.height = Math.round(vh * scale);
   c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
   const m = Math.min(c.width, c.height); // object-fit: cover shows the centered square; grid = 80% of it
-  usePhoto(c, { x: (c.width - m) / 2 + 0.1 * m, y: (c.height - m) / 2 + 0.1 * m, size: 0.8 * m });
-};
+  return { canvas: c, rect: { x: (c.width - m) / 2 + 0.1 * m, y: (c.height - m) / 2 + 0.1 * m, size: 0.8 * m } };
+}
+function autoSnap() {
+  const g = grabFrame(); if (!g) return;
+  live.busy = true;
+  const fl = $('#flash'); fl.classList.remove('go'); void fl.offsetWidth; fl.classList.add('go');
+  beep();
+  app.faces[app.step] = { photo: g.canvas, rect: g.rect, manual: {}, colors: [], samples: null, auto: true };
+  readPhoto();
+  setLive('good', 1);
+  const next = app.faces.findIndex(f => !f || !f.samples), last = app.retakeOnly || next < 0;
+  $('#got-face').innerHTML = faceSvg(app.faces[app.step].colors, { size: 120 });
+  $('#got-text').textContent = last ? 'Got it! All done! 🎉' : `Got it! ✓ Next: ${NAME(SCAN[next].front)}`;
+  $('#got').classList.remove('hidden');
+  renderDots();
+  live.gotTimer = setTimeout(() => {
+    $('#got').classList.add('hidden');
+    live.busy = false;
+    if (last) { app.retakeOnly = false; buildCube(); return; }
+    app.step = next; renderStep(); window.scrollTo(0, 0);
+  }, 1400);
+}
+
+$('#snap').onclick = () => { const g = grabFrame(); if (g) usePhoto(g.canvas, g.rect); };
 $('#file').onchange = e => {
   const file = e.target.files[0]; if (!file) return;
   const img = new Image();
@@ -255,7 +360,9 @@ $('#retake').addEventListener('click', e => {
   const b = e.target.closest('[data-retake]'); if (!b) return;
   app.step = +b.dataset.retake; app.mode = 'photo';
   if (app.faces[app.step]) app.faces[app.step] = null;
+  app.retakeOnly = app.faces.every((f, i) => i === app.step || (f && f.samples));
   history.pushState(null, '', '#scan'); show('scan'); renderStep();
+  if (!app.stream) startCam();
 });
 $('#go-solve').onclick = () => startSolve(app.cube, 0);
 

@@ -5,7 +5,7 @@ A tiny, phone-friendly web app that helps a kid learn to solve a 3×3 Rubik's Cu
 **Live:** https://scottcorgan.github.io/cube-helper/
 
 ## What it does
-- **Scan:** a guided photo of each of the 6 sides, with a picture showing exactly how to hold the cube. Every sticker can be fixed by tapping it.
+- **Scan:** a live camera view with a 3×3 square. Hold up the side it asks for; when the cube fills the square, the middle sticker is the right color, and you hold still for a moment, it takes the picture by itself (flash + beep), reads the colors, and tells you which side to show next. Shows the wrong side? It says so. There's still a manual snap button, a photo-upload fallback, and "Tap in the colors". Every sticker can be fixed by tapping it.
 - **Check:** makes sure the colors describe a real cube (9 of each color, real pieces, no impossible twist, flip or swap), and explains what probably got misread.
 - **Solve:** a beginner-method solver (daisy → white cross → white corners → middle layer → yellow cross → yellow edges → yellow corners). Each move is shown on a picture of the cube with a big arrow, plain kid words and the move letter, plus a "why" for every step and a "tell me more" for grown-ups.
 - **Learn the moves**, and a **practice** mode.
@@ -21,6 +21,9 @@ This is a plain static site. There's no server, no accounts, no ads, no analytic
 
 ## Develop
 ```
-npm test                          # node --test: cube model, 1000-scramble solver, validation, color reading
+npm test                          # node --test: cube model, 1000-scramble solver, validation, color reading, live face detection
 python3 -m http.server 8000       # then open http://localhost:8000
+cd scripts && npm install          # puppeteer-core, for headless checks
+node make_video.mjs && node live.mjs http://127.0.0.1:8000/   # fake-camera auto-capture run
 ```
+Screenshots from the scripts go to `screenshots/` and are not committed.
